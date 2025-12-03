@@ -51,38 +51,6 @@ def get_font_families() -> List[str]:
         "Liberation Sans"
     ]
 
-def strip_manual_numbering(content: str) -> str:
-    """
-    Remove manual section numbering from markdown headers.
-
-    Converts headers like:
-      ## 1. Objectives and Hypotheses
-      ### 1.1 Primary Objective
-    To:
-      ## Objectives and Hypotheses
-      ### Primary Objective
-    """
-    # Pattern matches headers with manual numbering like "# 1.", "## 1.1", "### 1.1.2", etc.
-    # Handles both "1." and "1.1" and "1.1.1" style numbering
-    pattern = r'^(#{1,6})\s*\d+(?:\.\d+)*\.?\s+'
-
-    lines = content.split('\n')
-    processed_lines = []
-
-    for line in lines:
-        # Check if this is a header line with manual numbering
-        match = re.match(pattern, line)
-        if match:
-            # Extract the hash marks and the rest of the content after the numbering
-            hashes = match.group(1)
-            # Remove the matched prefix and keep the rest
-            remaining = line[match.end():]
-            processed_lines.append(f"{hashes} {remaining}")
-        else:
-            processed_lines.append(line)
-
-    return '\n'.join(processed_lines)
-
 def fix_bullet_lists(content: str) -> str:
     """
     Ensure proper line breaks before bullet lists.
@@ -130,13 +98,12 @@ def extract_title_for_toc(content: str) -> Tuple[str, Optional[str]]:
 
     return '\n'.join(processed_lines), title
 
-def preprocess_markdown(content: str, number_sections: bool = False, toc: bool = False) -> str:
+def preprocess_markdown(content: str, toc: bool = False) -> str:
     """
     Preprocess markdown content to fix common issues.
 
     Args:
         content: Raw markdown content
-        number_sections: Whether auto-numbering is enabled
         toc: Whether TOC is enabled
 
     Returns:
@@ -144,10 +111,6 @@ def preprocess_markdown(content: str, number_sections: bool = False, toc: bool =
     """
     # Fix bullet list formatting
     content = fix_bullet_lists(content)
-
-    # Strip manual numbering if auto-numbering is enabled
-    if number_sections:
-        content = strip_manual_numbering(content)
 
     # Extract title if TOC is enabled
     if toc:
@@ -164,7 +127,6 @@ def convert_md_to_docx(
     output_filename: str,
     toc: bool = False,
     toc_depth: int = 3,
-    number_sections: bool = False,
     highlight_style: str = "pygments",
     reference_doc: Optional[str] = None,
     dpi: int = 96
@@ -177,7 +139,6 @@ def convert_md_to_docx(
         output_filename: Desired output filename
         toc: Generate table of contents
         toc_depth: Depth of TOC (1-6)
-        number_sections: Add section numbers
         highlight_style: Code syntax highlighting style
         reference_doc: Path to reference DOCX template
         dpi: Image resolution
@@ -186,16 +147,13 @@ def convert_md_to_docx(
         bytes: The DOCX file content
     """
     # Preprocess markdown content
-    input_content = preprocess_markdown(input_content, number_sections=number_sections, toc=toc)
+    input_content = preprocess_markdown(input_content, toc=toc)
 
     extra_args = ["--standalone"]
 
     if toc:
         extra_args.append("--toc")
         extra_args.append(f"--toc-depth={toc_depth}")
-
-    if number_sections:
-        extra_args.append("--number-sections")
 
     extra_args.append(f"--highlight-style={highlight_style}")
     extra_args.append(f"--dpi={dpi}")
@@ -217,16 +175,18 @@ def convert_md_to_docx(
             extra_args=extra_args
         )
 
-        # Post-process DOCX to remove field codes that cause the warning
-        output_bytes = _remove_docx_field_codes(output_path)
+        # Post-process DOCX to fix styling (colors, fonts) and remove field codes
+        output_bytes = _postprocess_docx(output_path)
         return output_bytes
 
 
-def _remove_docx_field_codes(docx_path: str) -> bytes:
+def _postprocess_docx(docx_path: str) -> bytes:
     """
-    Remove field codes from DOCX that cause 'update fields' warning.
+    Post-process DOCX file to fix styling issues.
 
-    This modifies the TOC to be static text instead of dynamic fields.
+    - Makes all header colors black (removes blue styling)
+    - Sets font to Latin Modern Roman to match PDF output
+    - Removes field codes that cause 'update fields' warning
     """
     import zipfile
     import io
@@ -243,15 +203,50 @@ def _remove_docx_field_codes(docx_path: str) -> bytes:
             for item in zin.infolist():
                 data = zin.read(item.filename)
 
-                # Process document.xml to remove field codes
-                if item.filename == 'word/document.xml':
+                # Process styles.xml to fix header colors and fonts
+                if item.filename == 'word/styles.xml':
                     content = data.decode('utf-8')
+                    # Remove any blue color from heading styles (color value 2E74B5 or similar blues)
+                    # This targets <w:color w:val="XXXXXX"/> inside heading style definitions
+                    content = re.sub(r'<w:color\s+w:val="[0-9A-Fa-f]{6}"\s*/>', '', content)
+                    # Also remove themeColor references that cause blue headers
+                    content = re.sub(r'<w:color[^>]*w:themeColor="[^"]*"[^>]*/>', '', content)
+
+                    # Change default font from Cambria to Latin Modern Roman
+                    # Replace Cambria font references
+                    content = re.sub(r'w:ascii="Cambria"', 'w:ascii="Latin Modern Roman"', content)
+                    content = re.sub(r'w:hAnsi="Cambria"', 'w:hAnsi="Latin Modern Roman"', content)
+                    content = re.sub(r'w:eastAsia="Cambria"', 'w:eastAsia="Latin Modern Roman"', content)
+                    content = re.sub(r'w:cs="Cambria"', 'w:cs="Latin Modern Roman"', content)
+
+                    # Also handle the theme font settings
+                    content = re.sub(r'w:asciiTheme="[^"]*"', 'w:ascii="Latin Modern Roman"', content)
+                    content = re.sub(r'w:hAnsiTheme="[^"]*"', 'w:hAnsi="Latin Modern Roman"', content)
+                    content = re.sub(r'w:eastAsiaTheme="[^"]*"', 'w:eastAsia="Latin Modern Roman"', content)
+                    content = re.sub(r'w:cstheme="[^"]*"', 'w:cs="Latin Modern Roman"', content)
+
+                    data = content.encode('utf-8')
+
+                # Process document.xml to fix colors and remove field codes
+                elif item.filename == 'word/document.xml':
+                    content = data.decode('utf-8')
+                    # Remove any inline blue color styling
+                    content = re.sub(r'<w:color\s+w:val="[0-9A-Fa-f]{6}"\s*/>', '', content)
+                    content = re.sub(r'<w:color[^>]*w:themeColor="[^"]*"[^>]*/>', '', content)
+
                     # Remove HYPERLINK field codes that reference external files
                     # These patterns match Word field codes like PAGEREF, HYPERLINK \l, etc.
                     content = re.sub(r'<w:fldChar[^>]*w:fldCharType="begin"[^>]*/>', '', content)
                     content = re.sub(r'<w:fldChar[^>]*w:fldCharType="separate"[^>]*/>', '', content)
                     content = re.sub(r'<w:fldChar[^>]*w:fldCharType="end"[^>]*/>', '', content)
                     content = re.sub(r'<w:instrText[^>]*>.*?</w:instrText>', '', content, flags=re.DOTALL)
+                    data = content.encode('utf-8')
+
+                # Process theme file to change default fonts
+                elif item.filename == 'word/theme/theme1.xml':
+                    content = data.decode('utf-8')
+                    # Change Cambria to Latin Modern Roman in theme
+                    content = re.sub(r'typeface="Cambria"', 'typeface="Latin Modern Roman"', content)
                     data = content.encode('utf-8')
 
                 zout.writestr(item, data)
@@ -264,7 +259,6 @@ def convert_md_to_pdf(
     output_filename: str,
     toc: bool = False,
     toc_depth: int = 3,
-    number_sections: bool = False,
     highlight_style: str = "pygments",
     pdf_engine: str = "xelatex",
     paper_size: str = "a4",
@@ -286,7 +280,6 @@ def convert_md_to_pdf(
         output_filename: Desired output filename
         toc: Generate table of contents
         toc_depth: Depth of TOC (1-6)
-        number_sections: Add section numbers
         highlight_style: Code syntax highlighting style
         pdf_engine: LaTeX engine (xelatex, pdflatex, lualatex)
         paper_size: Paper size (a4, letter, legal)
@@ -304,9 +297,9 @@ def convert_md_to_pdf(
         bytes: The PDF file content
     """
     # Preprocess markdown content
-    input_content = preprocess_markdown(input_content, number_sections=number_sections, toc=toc)
+    input_content = preprocess_markdown(input_content, toc=toc)
 
-    # Build margin string
+    # Build margin string for geometry package
     margin_parts = []
     if margin_top:
         margin_parts.append(f"top={margin_top}")
@@ -326,25 +319,61 @@ def convert_md_to_pdf(
         "--standalone",
         f"--pdf-engine={pdf_engine}",
         f"--highlight-style={highlight_style}",
-        f"-V geometry:{margin_str}",
         f"-V fontsize={font_size}",
         f"-V papersize={paper_size}",
         f"-V linestretch={line_stretch}",
         f"-V documentclass={document_class}",
         # Force black color for all text
         "-V colorlinks=false",
+        "-V urlcolor=black",
+        "-V linkcolor=black",
+        "-V toccolor=black",
     ]
 
-    # Add font family for xelatex
-    if pdf_engine == "xelatex" and font_family:
-        extra_args.append(f"-V mainfont={font_family}")
+    # Add geometry package with proper syntax
+    extra_args.append(f"-V geometry={margin_str}")
+
+    # Add header-includes for title spacing and unicode support
+    header_includes = []
+
+    # Reduce space between title and content
+    header_includes.append(r"\usepackage{titling}")
+    header_includes.append(r"\setlength{\droptitle}{-2em}")
+    header_includes.append(r"\predate{}")
+    header_includes.append(r"\postdate{}")
+    header_includes.append(r"\preauthor{}")
+    header_includes.append(r"\postauthor{}")
+
+    # Add packages for xelatex unicode support
+    if pdf_engine == "xelatex":
+        header_includes.append(r"\usepackage{fontspec}")
+        header_includes.append(r"\usepackage{unicode-math}")
+        # Set default font if not specified
+        if font_family:
+            extra_args.append(f"-V mainfont={font_family}")
+        else:
+            header_includes.append(r"\setmainfont{Latin Modern Roman}")
+    elif pdf_engine == "pdflatex":
+        # For pdflatex, use inputenc and textgreek for unicode
+        header_includes.append(r"\usepackage[utf8]{inputenc}")
+        header_includes.append(r"\usepackage[T1]{fontenc}")
+        header_includes.append(r"\usepackage{textgreek}")
+        header_includes.append(r"\usepackage{lmodern}")
+    elif pdf_engine == "lualatex":
+        header_includes.append(r"\usepackage{fontspec}")
+        header_includes.append(r"\usepackage{unicode-math}")
+        if font_family:
+            extra_args.append(f"-V mainfont={font_family}")
+        else:
+            header_includes.append(r"\setmainfont{Latin Modern Roman}")
+
+    # Add header includes to extra_args
+    for include in header_includes:
+        extra_args.append(f"-V header-includes={include}")
 
     if toc:
         extra_args.append("--toc")
         extra_args.append(f"--toc-depth={toc_depth}")
-
-    if number_sections:
-        extra_args.append("--number-sections")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = os.path.join(tmpdir, "input.md")
