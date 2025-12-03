@@ -79,8 +79,6 @@ def main():
                     help="Maximum heading level to include in TOC"
                 )
 
-            number_sections = st.checkbox("Number Sections", value=False)
-
             highlight_style = st.selectbox(
                 "Syntax Highlighting Style",
                 options=get_highlight_styles(),
@@ -248,7 +246,6 @@ def main():
                             output_filename=output_filename,
                             toc=toc,
                             toc_depth=toc_depth,
-                            number_sections=number_sections,
                             highlight_style=highlight_style,
                             reference_doc=reference_doc_path,
                             dpi=dpi
@@ -262,7 +259,6 @@ def main():
                             output_filename=output_filename,
                             toc=toc,
                             toc_depth=toc_depth,
-                            number_sections=number_sections,
                             highlight_style=highlight_style,
                             pdf_engine=pdf_engine,
                             paper_size=paper_size,
