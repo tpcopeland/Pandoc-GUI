@@ -10,7 +10,8 @@ from utils.converter import (
     get_pdf_engines,
     get_paper_sizes,
     get_font_sizes,
-    get_document_classes
+    get_document_classes,
+    get_font_families
 )
 from utils.styles import get_custom_css
 
@@ -96,6 +97,12 @@ def main():
         margin = None
         line_stretch = None
         document_class = None
+        font_family = None
+        margin_top = None
+        margin_bottom = None
+        margin_left = None
+        margin_right = None
+        use_custom_margins = False
 
         if is_docx:
             # DOCX Options
@@ -127,16 +134,31 @@ def main():
                 pdf_engine = st.selectbox(
                     "PDF Engine",
                     options=get_pdf_engines(),
-                    index=0,
-                    help="LaTeX engine to use for PDF generation"
+                    index=0,  # xelatex is first (default)
+                    help="LaTeX engine to use for PDF generation. XeLaTeX is recommended for best results."
                 )
 
                 paper_size = st.selectbox(
                     "Paper Size",
                     options=get_paper_sizes(),
-                    index=get_paper_sizes().index("letter") if "letter" in get_paper_sizes() else 0,
+                    index=0,  # a4 is first (default)
                     help="Page size for the PDF document"
                 )
+
+                st.markdown("---")
+                st.markdown("**Font Settings**")
+
+                # Font family (only for xelatex)
+                if pdf_engine == "xelatex":
+                    font_families = get_font_families()
+                    font_family = st.selectbox(
+                        "Font Family",
+                        options=["(Default - Latin Modern Roman)"] + font_families,
+                        index=0,
+                        help="Select font family (xelatex only). Leave as default for the standard LaTeX look."
+                    )
+                    if font_family == "(Default - Latin Modern Roman)":
+                        font_family = None
 
                 font_size = st.selectbox(
                     "Font Size",
@@ -145,20 +167,56 @@ def main():
                     help="Base font size for the document"
                 )
 
-                margin = st.text_input(
-                    "Margin",
-                    value="1in",
-                    help="Page margins (e.g., '1in', '2cm', '20mm')"
-                )
-
                 line_stretch = st.slider(
                     "Line Spacing",
                     min_value=1.0,
                     max_value=2.0,
-                    value=1.15,
+                    value=1.0,  # Default to 1.0 (single spacing)
                     step=0.05,
-                    help="Line height multiplier"
+                    help="Line height multiplier (1.0 = single, 1.5 = one-and-half, 2.0 = double)"
                 )
+
+                st.markdown("---")
+                st.markdown("**Margin Settings**")
+
+                use_custom_margins = st.checkbox(
+                    "Use custom margins for each side",
+                    value=False,
+                    help="Enable to set different margins for top, bottom, left, and right"
+                )
+
+                if use_custom_margins:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        margin_top = st.text_input(
+                            "Top Margin",
+                            value="2.5cm",
+                            help="Top margin (e.g., '2.5cm', '1in')"
+                        )
+                        margin_left = st.text_input(
+                            "Left Margin",
+                            value="2.5cm",
+                            help="Left margin"
+                        )
+                    with col2:
+                        margin_bottom = st.text_input(
+                            "Bottom Margin",
+                            value="2.5cm",
+                            help="Bottom margin"
+                        )
+                        margin_right = st.text_input(
+                            "Right Margin",
+                            value="2.5cm",
+                            help="Right margin"
+                        )
+                else:
+                    margin = st.text_input(
+                        "Margin (all sides)",
+                        value="2.5cm",
+                        help="Page margins for all sides (e.g., '2.5cm', '1in', '20mm')"
+                    )
+
+                st.markdown("---")
 
                 document_class = st.selectbox(
                     "Document Class",
@@ -209,9 +267,14 @@ def main():
                             pdf_engine=pdf_engine,
                             paper_size=paper_size,
                             font_size=font_size,
-                            margin=margin,
+                            margin=margin if not use_custom_margins else "2.5cm",
                             line_stretch=line_stretch,
-                            document_class=document_class
+                            document_class=document_class,
+                            font_family=font_family,
+                            margin_top=margin_top if use_custom_margins else None,
+                            margin_bottom=margin_bottom if use_custom_margins else None,
+                            margin_left=margin_left if use_custom_margins else None,
+                            margin_right=margin_right if use_custom_margins else None
                         )
                         mime_type = "application/pdf"
 
